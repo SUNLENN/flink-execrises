@@ -18,6 +18,10 @@
 
 package org.apache.flink.training.exercises.longrides;
 
+
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.TimerService;
@@ -64,19 +68,40 @@ public class LongRidesExercise extends ExerciseBase {
 	}
 
 	public static class MatchFunction extends KeyedProcessFunction<Long, TaxiRide, TaxiRide> {
-
+		private transient ValueState<TaxiRide> taxiRide;
 		@Override
 		public void open(Configuration config) throws Exception {
-			throw new MissingSolutionException();
+			ValueStateDescriptor<TaxiRide> taxiRideDesc = new ValueStateDescriptor<TaxiRide>("taxiRide", TaxiRide.class);
+			taxiRide = getRuntimeContext().getState(taxiRideDesc);
 		}
 
 		@Override
 		public void processElement(TaxiRide ride, Context context, Collector<TaxiRide> out) throws Exception {
 			TimerService timerService = context.timerService();
+			if (!ride.isStart) {
+				if (taxiRide.value() != null) {
+					taxiRide.clear();
+				} else {
+					taxiRide.update(ride);
+				}
+			} else {
+				if (taxiRide.value() != null) {
+					taxiRide.clear();
+				} else {
+					taxiRide.update(ride);
+					long end = ride.getEventTime() + Time.hours(2).toMilliseconds();
+					timerService.registerEventTimeTimer(end);
+				}
+			}
+
 		}
 
 		@Override
 		public void onTimer(long timestamp, OnTimerContext context, Collector<TaxiRide> out) throws Exception {
+			if (taxiRide.value() != null) {
+				out.collect(taxiRide.value());
+				taxiRide.clear();
+			}
 		}
 	}
 }
